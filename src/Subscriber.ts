@@ -1,7 +1,7 @@
 import { Topic } from './Topic'
 
 /**
- * Subscriber is the class that is returned from [[`PubSub.subscribe`]] method. A returned instance can be reused for future subscriptions.
+ * Subscriber is the class that is returned from [[`Publisher.subscribe`]] method. A returned instance can be reused for future subscriptions.
  */
 export class Subscriber {
   handler: SubscriberHandler
@@ -11,7 +11,7 @@ export class Subscriber {
 }
 
 /**
- * SubscriberHandler is the callback interface that is expected by [[`PubSub.subscribe`]].
+ * SubscriberHandler is the callback interface that is expected by [[`Publisher.subscribe`]].
  */
 export interface SubscriberHandler {
   (result: PublishedMessage): Promise<void>
