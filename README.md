@@ -8,7 +8,7 @@ npm i @kettek/pubsub
 ```
 
 ## Documentation
-See the [TypeDoc generated documentation](docs/index.html).
+See the [TypeDoc generated documentation](https://kettek.github.io/node-pubsub/).
 
 ## Usage
 
