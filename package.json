@@ -1,0 +1,40 @@
+{
+  "name": "@kettek/pubsub",
+  "version": "0.1.0",
+  "description": "PubSub library with glob matching support.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "build:docs": "typedoc --readme ./README.md --out docs src/*.ts",
+    "prepublish": "tsc"
+  },
+  "keywords": [
+    "pubsub",
+    "publish",
+    "subscribe",
+    "glob",
+    "minimatch",
+    "star",
+    "wildcard"
+  ],
+  "author": "Ketchetwahmeegwun T. Southall",
+  "license": "MPL-2.0",
+  "devDependencies": {
+    "@types/minimatch": "^3.0.5",
+    "tslint": "^6.1.3",
+    "typedoc": "^0.22.10",
+    "typescript": "^4.5.2"
+  },
+  "dependencies": {
+    "minimatch": "^3.0.4"
+  },
+  "types": "./dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kettek/node-pubsub.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kettek/node-pubsub/issues"
+  },
+  "homepage": "https://github.com/kettek/node-pubsub#readme"
+}
