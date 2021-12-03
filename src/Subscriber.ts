@@ -5,8 +5,12 @@ import { Topic } from './Topic'
  */
 export class Subscriber {
   handler: SubscriberHandler
-  constructor(handler: SubscriberHandler) {
-    this.handler = handler
+  constructor(handler?: SubscriberHandler) {
+    if (handler) {
+      this.handler = handler
+    } else {
+      this.handler = async (msg: any): Promise<void> => {}
+    }
   }
 }
 

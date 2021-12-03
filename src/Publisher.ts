@@ -48,25 +48,46 @@ export class Publisher {
   endpoints = new Map<Topic, Endpoint[]>()
 
   /**
-   * Creates a subscriber for a given [[`Topic`]]. If a handler is provided, a new [[`Subscriber`]] instance is returned. If an existing Subscriber is provided, it is subscribed to the given topic and returned.
+   * Subscribes a handler to a topic and returns a new, corresponding Subscriber.
+   * 
+   * ```typescript
+   * 
+   * publisher.subscribe('topic.golang', async ({topic, message}) => {
+   *   console.log('handled', topic, message)
+   * })
+   * ```
+   * @param topic 
+   * @param handler
+   * @returns A new subscriber containing the handler.
+   */
+  subscribe(topic: Topic, handler: SubscriberHandler): Subscriber
+  /**
+   * Subscribes a subscriber to a given topic.
    * 
    * ```typescript
    * let subscriber = publisher.subscribe('topic.golang')
+   * 
+   * publisher.subscribe('topic.unix', subscriber)
    * ```
+   * @param topic 
+   * @param subscriber
+   * @returns The subscriber passed in.
+   */
+  subscribe(topic: Topic, subscriber: Subscriber): Subscriber
+  /**
+   * Creates a subscriber without a handler.
    * 
    * ```typescript
-   * let handler = async ({topic: string, message: any}) => {
-   *   console.log('handled', topic, message)
+   * let subscriber = publisher.subscribe('topic.golang')
+   * 
+   * subscriber.handler = async ({topic, message}) => {
+   *   console.log(message)
    * }
-   * 
-   * publisher.subscribe('topic.golang', handler)
    * ```
-   * 
-   * @param topic The topic to subscribe to.
-   * @param handlerOrSubscriber The handler or existing Subscriber to subscribe to the topic.
-   * @returns
+   * @param topic 
    */
-  subscribe(topic: Topic, handlerOrSubscriber: SubscriberHandler|Subscriber): Subscriber {
+  subscribe(topic: Topic): Subscriber
+  subscribe(topic: Topic, handlerOrSubscriber?: SubscriberHandler|Subscriber): Subscriber {
     if (handlerOrSubscriber instanceof Subscriber) {
       this.topics.set(topic, [
         ...this.topics.get(topic)||[],
@@ -166,11 +187,33 @@ export class Publisher {
   /**
    * This creates or uses an endpoint for a topic and returns it.
    * 
+   * ```typescript
+   * let endpoint = publisher.connect('*', async (msg: EndpointMessage): Promise<number> => {
+   *   return await conn.send(msg) // assume `conn` has a matching endpoint on the other side.
+   * })
+   * ```
+   * 
    * @param topic Topic that this endpoint should receive.
    * @param endpointOrHandler An endpoint instance or handler.
    * @returns The endpoint
    */
-  connect(topic: Topic, endpointOrHandler: Endpoint|EndpointOutboundHandler) {
+  connect(topic: Topic, endpointOrHandler: Endpoint|EndpointOutboundHandler): Endpoint
+  /**
+   * This creates an endpoint for a topic.
+   * 
+   * ```typescript
+   * let endpoint = publisher.connect('*')
+   * 
+   * endpoint.outbound = async (msg: EndpointMessage): Promise<number> => {
+   *   return await conn.send(msg)
+   * }
+   * ```
+   * 
+   * @param topic 
+   * @returns A new endpoint with a default handler.
+   */
+  connect(topic: Topic): Endpoint
+  connect(topic: Topic, endpointOrHandler?: Endpoint|EndpointOutboundHandler): Endpoint {
     if (endpointOrHandler instanceof Endpoint) {
       this.endpoints.set(topic, [
         ...this.endpoints.get(topic)||[],
@@ -191,6 +234,10 @@ export class Publisher {
   /**
    * This disconnects an endpoint from a topic.
    * 
+   * ```typescript
+   * publisher.disconnect('topic.*', endpoint)
+   * ```
+   * 
    * @param topic The topic to disconnect from.
    * @param endpoint The endpoint
    * @returns
@@ -198,6 +245,11 @@ export class Publisher {
   disconnect(topic: Topic, endpoint: Endpoint|EndpointOutboundHandler): number
   /**
    * This disconnects an endpoint from all topics.
+   * 
+   * ```typescript
+   * publisher.disconnect(endpoint)
+   * ```
+   * 
    * @param endpoint
    */
   disconnect(endpoint: Endpoint|EndpointOutboundHandler): number
