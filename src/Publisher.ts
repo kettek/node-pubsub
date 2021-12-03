@@ -41,6 +41,10 @@ export class Publisher {
    */
   topics = new Map<Topic, Subscriber[]>()
 
+  /**
+   * A map of topics to endpoints
+   * @private
+   */
   endpoints = new Map<Topic, Endpoint[]>()
 
   /**
@@ -82,11 +86,7 @@ export class Publisher {
   }
 
   /**
-   * Unsubscribes a [[`Subscriber`]] or a [[`SubscriberHandler`]] from a specific [[`Topic`]] pattern or from all topics it is subscribed to.
-   * 
-   * ```typescript
-   * publisher.unsubscribe(subscriber) // unsubscribes a subsciber from all topics.
-   * ```
+   * Unsubscribes a subscriber from a specific [[`Topic`]] pattern.
    * 
    * ```typescript
    * publisher.unsubscribe('topic.golang', subscriber) // unsubscribes from a single topic.
@@ -96,11 +96,24 @@ export class Publisher {
    * publisher.unsubscribe('topic.deno', handler)
    * ```
    * 
-   * @param topicOrSubscriber A subscriber if used as the only argument, or a topic if the subscriber argument is also provided.
-   * @param subscriber Only used if the first argument is a topic.
+   * @param topic
+   * @param subscriber 
    * @returns The number of subscriptions unsubscribed.
    * @throws TypeError if the arguments are not as expected.
    */
+  unsubscribe(topic: Topic, subscriber?: Subscriber|SubscriberHandler): number
+  /**
+   * Unsubscribes a subscriber from all topics it is subscribed to.
+   * 
+   * ```typescript
+   * publisher.unsubscribe(subscriber) // unsubscribes a subsciber from all topics.
+   * ```
+   * 
+   * @param subscriber
+   * @returns The number of subscriptions unsubscribed.
+   * @throws TypeError if the arguments are not as expected.
+   */
+  unsubscribe(subscriber: Subscriber|SubscriberHandler): number
   unsubscribe(topicOrSubscriber: Subscriber|SubscriberHandler|Topic, subscriber?: Subscriber|SubscriberHandler): number {
     let topic: Topic|undefined
     if (!subscriber) {
@@ -176,12 +189,18 @@ export class Publisher {
   }
 
   /**
-   * This disconnects an endpoint from all topics or some.
+   * This disconnects an endpoint from a topic.
    * 
-   * @param topicOrEndpoint The topic to disconnect from, or the endpoint if it is the only argument.
-   * @param endpoint The target endpoint if the first argument is a topic.
+   * @param topic The topic to disconnect from.
+   * @param endpoint The endpoint
    * @returns
    */
+  disconnect(topic: Topic, endpoint: Endpoint|EndpointOutboundHandler): number
+  /**
+   * This disconnects an endpoint from all topics.
+   * @param endpoint
+   */
+  disconnect(endpoint: Endpoint|EndpointOutboundHandler): number
   disconnect(topicOrEndpoint: Endpoint|EndpointOutboundHandler|Topic, endpoint?: Endpoint|EndpointOutboundHandler): number {
     let topic: Topic|undefined
     if (!endpoint) {
@@ -231,7 +250,7 @@ export class Publisher {
   }
 
   /**
-   * Sends a message to all subscribers of a [[`Topic`]].
+   * Sends a message to all subscribers and endpoints of a [[`Topic`]].
    * 
    * ```typescript
    * publisher.publish('topic.*', 'this is a message to subscribers of all topics')
@@ -244,6 +263,12 @@ export class Publisher {
    * @throws [[`PublishErrors`]] if any subscribers threw. Thrown _after_ all subscribers have been messaged.
    */
   async publish(topic: Topic, message: any): Promise<number>
+  /**
+   * Sends a message to all subscribers and endpoints, excluding the provided endpoint.
+   * 
+   * @param endpoint The endpoint to send on behalf of.
+   * @param message The message, either an EndpointMessage for forwarding, or any message. The endpoint will never see this message.
+   */
   async publish(endpoint: Endpoint, message: EndpointMessage|any): Promise<number>
   async publish(topicOrEndpoint: Topic|Endpoint, message: any): Promise<number> {
     let targetEndpoint: Endpoint|undefined = undefined
