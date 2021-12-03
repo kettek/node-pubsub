@@ -1,6 +1,7 @@
 import minimatch from 'minimatch'
 
 import { Subscriber, SubscriberHandler } from './Subscriber'
+import { Endpoint, EndpointMessage, EndpointOutboundHandler, messageIsEndpointMessage } from './Endpoint'
 import { Topic } from './Topic'
 
 /**
@@ -39,6 +40,8 @@ export class Publisher {
    * @private
    */
   topics = new Map<Topic, Subscriber[]>()
+
+  endpoints = new Map<Topic, Endpoint[]>()
 
   /**
    * Creates a subscriber for a given [[`Topic`]]. If a handler is provided, a new [[`Subscriber`]] instance is returned. If an existing Subscriber is provided, it is subscribed to the given topic and returned.
@@ -123,31 +126,107 @@ export class Publisher {
       topicKeys = this.topics.keys()
     }
 
+    let check: (v: any) => void
+
     if (typeof subscriber === 'function') {
-      for (let key of topicKeys) {
-        this.topics.set(
-          key, 
-          (this.topics.get(key)||[]).filter((s: Subscriber) => s.handler !== subscriber)
-        )
-        if (this.topics.get(key)?.length === 0) {
-          this.topics.delete(key)
-        }
-        removed++
-      }
+      check = (s: Subscriber) => s.handler !== subscriber
     } else if (subscriber instanceof Subscriber) {
-      for (let key of topicKeys) {
-        this.topics.set(
-          key, 
-          (this.topics.get(key)||[]).filter((s: Subscriber) => s !== subscriber)
-        )
-        if (this.topics.get(key)?.length === 0) {
-          this.topics.delete(key)
-        }
-        removed++
-      }
+      check = (s: Subscriber) => s !== subscriber
     } else {
       throw TypeError('subscriber must be a Subscriber or handler')
     }
+
+    for (let key of topicKeys) {
+      this.topics.set(
+        key, 
+        (this.topics.get(key)||[]).filter(check)
+      )
+      if (this.topics.get(key)?.length === 0) {
+        this.topics.delete(key)
+      }
+      removed++
+    }
+
+    return removed
+  }
+
+  /**
+   * This creates or uses an endpoint for a topic and returns it.
+   * 
+   * @param topic Topic that this endpoint should receive.
+   * @param endpointOrHandler An endpoint instance or handler.
+   * @returns The endpoint
+   */
+  connect(topic: Topic, endpointOrHandler: Endpoint|EndpointOutboundHandler) {
+    if (endpointOrHandler instanceof Endpoint) {
+      this.endpoints.set(topic, [
+        ...this.endpoints.get(topic)||[],
+        endpointOrHandler,
+      ])
+      return endpointOrHandler
+    } else {
+      let endpoint = new Endpoint(endpointOrHandler)
+
+      this.endpoints.set(topic, [
+        ...this.endpoints.get(topic)||[],
+        endpoint,
+      ])
+      return endpoint
+    }
+  }
+
+  /**
+   * This disconnects an endpoint from all topics or some.
+   * 
+   * @param topicOrEndpoint The topic to disconnect from, or the endpoint if it is the only argument.
+   * @param endpoint The target endpoint if the first argument is a topic.
+   * @returns
+   */
+  disconnect(topicOrEndpoint: Endpoint|EndpointOutboundHandler|Topic, endpoint?: Endpoint|EndpointOutboundHandler): number {
+    let topic: Topic|undefined
+    if (!endpoint) {
+      if (topicOrEndpoint instanceof Endpoint || typeof topicOrEndpoint === 'function') {
+        endpoint = topicOrEndpoint
+      } else {
+        throw TypeError('single argument disconnect must provide a Endpoint or handler')
+      }
+    } else {
+      if (typeof topicOrEndpoint === 'string') {
+        topic = topicOrEndpoint
+      } else {
+        throw TypeError('first argument must be a Topic')
+      }
+    }
+    let removed: number = 0
+
+    // Match against a specific topic key if given or all if not.
+    let topicKeys: IterableIterator<Topic>|Topic[]
+    if (topic) {
+      topicKeys = this.getMatchingTopics(topic)
+    } else {
+      topicKeys = this.endpoints.keys()
+    }
+
+    let check: (v: any) => void
+
+    if (typeof endpoint === 'function') {
+      check = (e: Endpoint) => e.outbound !== endpoint
+    } else if (endpoint instanceof Endpoint) {
+      check = (e: Endpoint) => e !== endpoint
+    } else {
+      throw TypeError('endpoint must be a Endpoint or handler')
+    }
+    for (let key of topicKeys) {
+      this.endpoints.set(
+        key, 
+        (this.endpoints.get(key)||[]).filter(check)
+      )
+      if (this.endpoints.get(key)?.length === 0) {
+        this.endpoints.delete(key)
+      }
+      removed++
+    }
+
     return removed
   }
 
@@ -164,22 +243,52 @@ export class Publisher {
    * @returns The number of subscribers who received the message.
    * @throws [[`PublishErrors`]] if any subscribers threw. Thrown _after_ all subscribers have been messaged.
    */
-  async publish(topic: Topic, message: any): Promise<number> {
+  async publish(topic: Topic, message: any): Promise<number>
+  async publish(endpoint: Endpoint, message: EndpointMessage): Promise<number>
+  async publish(topicOrEndpoint: Topic|Endpoint, message: any): Promise<number> {
+    let targetEndpoint: Endpoint|undefined = undefined
+    let topic: Topic|undefined = undefined
+    if (typeof topicOrEndpoint === 'string') {
+      topic = topicOrEndpoint
+    } else {
+      if (messageIsEndpointMessage(message)) {
+        topic = message.topic
+        message = message.message
+      } else {
+        topic = '*'
+      }
+      targetEndpoint = topicOrEndpoint
+    }
     let errors: PublishError[] = []
+    // Send to our subscribers.
     const results = this.getTopicSubscribers(topic)
     for (let result of results) {
       try {
-        await result.subscriber.handler({topic: result.topic, sourceTopic: topic,message})
+        await result.subscriber.handler({topic: result.topic, sourceTopic: topic, message})
       } catch(err: any) {
         let publishError = new PublishError(err, result.subscriber)
 
         errors.push(publishError)
       }
     }
+    // Send to our endpoints.
+    let endPointResults = 0
+    const topicEndpoints = this.getTopicEndpoints(topic)
+    for (let topicEndpoint of topicEndpoints) {
+      if (topicEndpoint.endpoint === targetEndpoint) continue // Do not send endpoint publishes to itself.
+      try {
+        endPointResults += await topicEndpoint.endpoint.outbound({wrapped: true, topic: topic, message})
+      } catch(err: any) {
+        let publishError = new PublishError(err, topicEndpoint.endpoint)
+
+        errors.push(publishError)
+      }
+    }
+
     if (errors.length > 0) {
       throw new PublishErrors(errors)
     }
-    return results.length
+    return results.length + endPointResults
   }
  
   /**
@@ -202,6 +311,21 @@ export class Publisher {
       }
     }
     return subs
+  }
+
+  getTopicEndpoints(topic: Topic): TopicEndpointResult[] {
+    let ends: TopicEndpointResult[] = []
+    for (let [topicKey, endpoints] of this.endpoints) {
+      if (minimatch(topic, topicKey) || minimatch(topicKey, topic)) {
+        ends.push(...endpoints.map((end: Endpoint): TopicEndpointResult => {
+          return {
+            topic: topicKey,
+            endpoint: end,
+          }
+        }))
+      }
+    }
+    return ends
   }
  
   /**
@@ -234,6 +358,17 @@ export interface TopicSubscriberResult {
 }
 
 /**
+ * TopicEndpointResult is an internally used interface for collecting and sending
+ * messages to endpoints.
+ *
+ * @private
+ */
+export interface TopicEndpointResult {
+  topic: string
+  endpoint: Endpoint
+}
+
+/**
  * PublishResult is the result of a call to [[`Publisher.publish`]].
  */
 export interface PublishResult {
@@ -254,15 +389,23 @@ export class PublishError extends Error {
   /**
    * A reference to the subscriber that caused the error.
    */
-  subscriber: Subscriber
+  subscriber?: Subscriber
+  /**
+   * A reference to the endpoint that caused the error.
+   */
+  endpoint?: Endpoint
   /**
    * The wrapped error that the subscriber threw.
    */
   error: any
-  constructor(e: any, subscriber: Subscriber) {
+  constructor(e: any, target: Subscriber|Endpoint) {
     super()
     this.error = e
-    this.subscriber = subscriber
+    if (target instanceof Subscriber) {
+      this.subscriber = target
+    } else if (target instanceof Endpoint) {
+      this.endpoint = target
+    }
   }
 }
 
