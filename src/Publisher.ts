@@ -244,7 +244,7 @@ export class Publisher {
    * @throws [[`PublishErrors`]] if any subscribers threw. Thrown _after_ all subscribers have been messaged.
    */
   async publish(topic: Topic, message: any): Promise<number>
-  async publish(endpoint: Endpoint, message: EndpointMessage): Promise<number>
+  async publish(endpoint: Endpoint, message: EndpointMessage|any): Promise<number>
   async publish(topicOrEndpoint: Topic|Endpoint, message: any): Promise<number> {
     let targetEndpoint: Endpoint|undefined = undefined
     let topic: Topic|undefined = undefined

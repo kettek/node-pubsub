@@ -29,5 +29,6 @@ export interface EndpointMessage extends PublishedMessage {
 }
 
 export function messageIsEndpointMessage(m: any): m is EndpointMessage {
+  if (!(m instanceof Object)) return false
   return 'wrapped' in m
 }
