@@ -1,4 +1,6 @@
 src/
 docs/
+tests/
+examples/
 tsconfig.json
 tslint.json
