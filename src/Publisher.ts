@@ -312,34 +312,72 @@ export class Publisher {
    * @param topic 
    * @param message 
    * @returns The number of subscribers who received the message.
-   * @throws [[`PublishErrors`]] if any subscribers threw. Thrown _after_ all subscribers have been messaged.
+   * @throws [[`PublishErrors`]] if any subscribers or endpoints threw. Thrown _after_ all subscribers have been messaged.
    */
   async publish(topic: Topic, message: any): Promise<number>
   /**
+   * Publishes a message to all subscribers and endpoints on behalf of a subscriber, excluding the subscriber itself. The topic must be one the subscriber is subscribed to.
+   * 
+   * ```typescript
+   * publisher.publish(subscriber, 'topic.golang', 'Greetings from a subscriber')
+   * ```
+   * 
+   * @param subscriber The subscriber to send on behalf of.
+   * @param topic A topic the subscriber is subscribed to.
+   * @param message The message. The subscriber will never see this message.
+   * @throws [[`SubscriberPublishError`]] if the subscriber sends to a topic it is not subscribed to.
+   * @throws [[`PublishErrors`]] if any subscribers or endpoints threw. Thrown _after_ all subscribers have been messaged.
+   */
+  async publish(subscriber: Subscriber, topic: Topic, message: any): Promise<number>
+  /**
    * Sends a message to all subscribers and endpoints, excluding the provided endpoint.
    * 
+   * ```typescript
+   * publisher.publish(endpoint, message)
+   * ```
+   * 
    * @param endpoint The endpoint to send on behalf of.
-   * @param message The message, either an EndpointMessage for forwarding, or any message. The endpoint will never see this message.
+   * @param message An EndpointMessage for forwarding. The endpoint will never see this message.
+   * @throws [[`EndpointPublishError`]] if the provided message is not an EndpointMessage.
+   * @throws [[`PublishErrors`]] if any subscribers or endpoints threw. Thrown _after_ all subscribers have been messaged.
    */
-  async publish(endpoint: Endpoint, message: EndpointMessage|any): Promise<number>
-  async publish(topicOrEndpoint: Topic|Endpoint, message: any): Promise<number> {
+  async publish(endpoint: Endpoint, message: EndpointMessage): Promise<number>
+  async publish(topicOrEndpoint: Topic|Endpoint|Subscriber, topicOrMessage: any, message?: any): Promise<number> {
     let targetEndpoint: Endpoint|undefined = undefined
-    let topic: Topic|undefined = undefined
+    let targetSubscriber: Subscriber|undefined = undefined
+    let topic: Topic= '*'
+
+    if (message === undefined) {
+      message = topicOrMessage
+    }
+
     if (typeof topicOrEndpoint === 'string') {
       topic = topicOrEndpoint
-    } else {
+    } else if (topicOrEndpoint instanceof Subscriber) {
+      targetSubscriber = topicOrEndpoint
+      topic = topicOrMessage
+    } else if (topicOrEndpoint instanceof Endpoint) {
       if (messageIsEndpointMessage(message)) {
         topic = message.topic
         message = message.message
       } else {
-        topic = '*'
+        throw new EndpointPublishError('not an EndpointMessage', topicOrEndpoint)
       }
       targetEndpoint = topicOrEndpoint
     }
+
+    // Limit subscribers to sending only to their own subscription domains.
+    if (targetSubscriber) {
+      if (!this.isSubscribed(targetSubscriber, topic)) {
+        throw new SubscriberPublishError('invalid permissions', targetSubscriber)
+      }
+    }
+
     let errors: PublishError[] = []
     // Send to our subscribers.
     const results = this.getTopicSubscribers(topic)
     for (let result of results) {
+      if (result.subscriber === targetSubscriber) continue // Do not send subscriber publishes to itself.
       try {
         await result.subscriber.handler({topic: result.topic, sourceTopic: topic, message})
       } catch(err: any) {
@@ -378,7 +416,7 @@ export class Publisher {
   getTopicSubscribers(topic: Topic): TopicSubscriberResult[] {
     let subs: TopicSubscriberResult[] = []
     for (let [topicKey, subscribers] of this.topics) {
-      if (minimatch(topic, topicKey) || minimatch(topicKey, topic)) {
+      if (this.matchTopic(topic, topicKey) || this.matchTopic(topicKey, topic)) {
         subs.push(...subscribers.map((sub: Subscriber): TopicSubscriberResult => {
           return {
             topic: topicKey,
@@ -390,10 +428,36 @@ export class Publisher {
     return subs
   }
 
+  /**
+   * Checks if the subscriber is subscribed to a particular topic.
+   * 
+   * For example, if a subscriber has been subscribed to `topic.*` and `topic.golang` is checked for, then this will return true.
+   * @param subscriber The subscriber to check
+   * @param topic The topic to check for
+   * @private
+   * @returns Whether or not the subscriber is subscribed to the topic
+   */
+  isSubscribed(subscriber: Subscriber, topic: Topic): boolean {
+    for (let [topicKey, subscribers] of this.topics) {
+      if (!subscribers.includes(subscriber)) continue
+      if (this.matchTopic(topic, topicKey)) {
+        return true
+      }
+    }
+    return false
+  }
+
+  /**
+   * Returns all endpoints for a given topic.
+   * 
+   * @private
+   * @param topic 
+   * @returns 
+   */
   getTopicEndpoints(topic: Topic): TopicEndpointResult[] {
     let ends: TopicEndpointResult[] = []
     for (let [topicKey, endpoints] of this.endpoints) {
-      if (minimatch(topic, topicKey) || minimatch(topicKey, topic)) {
+      if (this.matchTopic(topic, topicKey) || this.matchTopic(topicKey, topic)) {
         ends.push(...endpoints.map((end: Endpoint): TopicEndpointResult => {
           return {
             topic: topicKey,
@@ -415,11 +479,20 @@ export class Publisher {
   getMatchingTopics(topic: Topic): Topic[] {
     let topics: Topic[] = []
     for (let topicKey of this.topics.keys()) {
-      if (minimatch(topicKey, topic)) {
+      if (this.matchTopic(topicKey, topic)) {
         topics.push(topicKey)
       }
     }
     return topics
+  }
+
+  /**
+   * Checks if topicA is matched by topicB.
+   * 
+   * @private
+   */
+  matchTopic(topicA: Topic, topicB: Topic) {
+    return minimatch(topicA, topicB)
   }
 }
 
@@ -509,5 +582,35 @@ export class PublishErrors extends Error {
   constructor(errors: PublishError[]) {
     super()
     this.errors = errors
+  }
+}
+
+/**
+ * This error is thrown when a subscriber publish request does not match its permissions.
+ */
+export class SubscriberPublishError extends Error {
+  /**
+   * A reference to the subscriber that caused the error.
+   */
+  subscriber: Subscriber
+
+  constructor(m: string, target: Subscriber) {
+    super(m)
+    this.subscriber = target
+  }
+}
+
+/**
+ * This error is thrown when a non-endpoint message is attempted to be sent on behalf of an endpoint.
+ */
+export class EndpointPublishError extends Error {
+  /**
+   * A reference to the endpoint that caused the error.
+   */
+  endpoint: Endpoint
+
+  constructor(m: string, target: Endpoint) {
+    super(m)
+    this.endpoint = target
   }
 }
