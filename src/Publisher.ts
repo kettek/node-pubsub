@@ -593,7 +593,7 @@ export class PublishErrors extends Error {
    */
   errors: PublishError[]
   constructor(errors: PublishError[]) {
-    super()
+    super('one or more publish errors')
     this.errors = errors
   }
 }
