@@ -37,4 +37,9 @@ export interface PublishedMessage {
    * The message published.
    */
   message: any
+
+  /**
+   * Indicates that the message is from a subscriber and not the publisher or and endpoint.
+   */
+  fromSubscriber?: boolean
 }

@@ -1,6 +1,6 @@
 import minimatch from 'minimatch'
 
-import { Subscriber, SubscriberHandler } from './Subscriber'
+import { PublishedMessage, Subscriber, SubscriberHandler } from './Subscriber'
 import { Endpoint, EndpointMessage, EndpointOutboundHandler, messageIsEndpointMessage } from './Endpoint'
 import { Topic } from './Topic'
 
@@ -316,7 +316,7 @@ export class Publisher {
    */
   async publish(topic: Topic, message: any): Promise<number>
   /**
-   * Publishes a message to all subscribers and endpoints on behalf of a subscriber, excluding the subscriber itself. The topic must be one the subscriber is subscribed to.
+   * Publishes a message to all subscribers and endpoints on behalf of a subscriber. The topic must be one the subscriber is subscribed to. The received publish message will contain `fromSubscriber`.
    * 
    * ```typescript
    * publisher.publish(subscriber, 'topic.golang', 'Greetings from a subscriber')
@@ -324,7 +324,7 @@ export class Publisher {
    * 
    * @param subscriber The subscriber to send on behalf of.
    * @param topic A topic the subscriber is subscribed to.
-   * @param message The message. The subscriber will never see this message.
+   * @param message The message.
    * @throws [[`SubscriberPublishError`]] if the subscriber sends to a topic it is not subscribed to.
    * @throws [[`PublishErrors`]] if any subscribers or endpoints threw. Thrown _after_ all subscribers have been messaged.
    */
@@ -345,7 +345,7 @@ export class Publisher {
   async publish(topicOrEndpoint: Topic|Endpoint|Subscriber, topicOrMessage: any, message?: any): Promise<number> {
     let targetEndpoint: Endpoint|undefined = undefined
     let targetSubscriber: Subscriber|undefined = undefined
-    let topic: Topic= '*'
+    let topic: Topic = '*'
 
     if (message === undefined) {
       message = topicOrMessage
@@ -366,20 +366,29 @@ export class Publisher {
       targetEndpoint = topicOrEndpoint
     }
 
+    let publishMessage: PublishedMessage = {
+      topic: topic,
+      message: message,
+    }
+
     // Limit subscribers to sending only to their own subscription domains.
     if (targetSubscriber) {
       if (!this.isSubscribed(targetSubscriber, topic)) {
         throw new SubscriberPublishError('invalid permissions', targetSubscriber)
       }
+      publishMessage.fromSubscriber = true
     }
 
     let errors: PublishError[] = []
     // Send to our subscribers.
     const results = this.getTopicSubscribers(topic)
     for (let result of results) {
-      if (result.subscriber === targetSubscriber) continue // Do not send subscriber publishes to itself.
       try {
-        await result.subscriber.handler({topic: result.topic, sourceTopic: topic, message})
+        await result.subscriber.handler({
+          ...publishMessage,
+          topic: result.topic,
+          sourceTopic: topic,
+        })
       } catch(err: any) {
         let publishError = new PublishError(err, result.subscriber)
 
@@ -392,7 +401,11 @@ export class Publisher {
     for (let topicEndpoint of topicEndpoints) {
       if (topicEndpoint.endpoint === targetEndpoint) continue // Do not send endpoint publishes to itself.
       try {
-        endPointResults += await topicEndpoint.endpoint.outbound({wrapped: true, topic: topic, message})
+        endPointResults += await topicEndpoint.endpoint.outbound({
+          ...publishMessage,
+          wrapped: true,
+          topic: topic,
+        })
       } catch(err: any) {
         let publishError = new PublishError(err, topicEndpoint.endpoint)
 
