@@ -1,6 +1,6 @@
 {
   "name": "@kettek/pubsub",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "PubSub library with glob matching support.",
   "main": "dist/index.js",
   "scripts": {
